@@ -39,7 +39,6 @@ class ProcessGroupAgent : public RpcAgent {
  public:
 
   ProcessGroupAgent(std::string workerName,
-                    std::unordered_map<std::string, int> nameMap,
                     std::shared_ptr<c10d::ProcessGroup> pg,
                     int numSendRecvThreads = 4);
 
