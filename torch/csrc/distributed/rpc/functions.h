@@ -13,7 +13,7 @@ namespace distributed {
 namespace rpc {
 
 void processRequestBlocking(
-    const std::string& from, Message&& message, RpcAgent& agent);
+    worker_id_t from, Message&& message, RpcAgent& agent);
 
 } // rpc
 } // distributed

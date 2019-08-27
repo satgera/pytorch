@@ -12,6 +12,15 @@ import torch
 _agent = None
 
 
+def _require_initialized(func):
+    def wrapper(*args, **kwargs):
+        if _agent is None:
+            raise RuntimeError("RPC has not been initialized. "
+                               "Call init_rpc(name) first.")
+        return func(*args, **kwargs)
+    return wrapper
+
+
 def _collect_worker_names(name, group):
     from . import all_gather
     from . import get_world_size
@@ -52,6 +61,7 @@ def join_rpc():
         _agent = None
 
 
+@_require_initialized
 def sync_rpc():
     r"""
     Block until all local and remote RPC processes reach this method and finish
@@ -59,14 +69,10 @@ def sync_rpc():
     level, if multiple threads are spawned, only one of them should call this
     method at a time.
     """
-    if _agent is None:
-        raise RuntimeError("RPC has not been initialized. "
-                           "Call init_rpc(name) first.")
-
     _agent.sync()
 
 
-# TODO: add a context managet to wrap init_rpc and join_rpc
+# TODO: add a context manager to wrap init_rpc and join_rpc
 def init_rpc(name, backend='pg'):
     r"""
     Initialize the local RPC agent which immediately makes the current process
@@ -101,6 +107,22 @@ def init_rpc(name, backend='pg'):
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
+@_require_initialized
+def get_worker_id(worker_name=None):
+    r"""
+    Get worker id of a given worker name.
+
+    Arguments:
+        worker_name (str): the string name of a worker. If ``None``, return the
+                           the id of the current worker. (default ``None``)
+    """
+    if worker_name:
+        return _agent.get_worker_id(worker_name)
+    else:
+        return _agent.get_id()
+
+
+@_require_initialized
 def rpc(to, func, args=None, kwargs=None, async_call=False):
     r"""
     Make an RPC call to run function ``func`` on worker ``to``. By default, it
@@ -109,8 +131,9 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
     thread-safe.
 
     Arguments:
-        to (str): name of the destination worker.
-        func (callable): any callable function. builtin functions (like torch.add) can be sent over RPC more efficiently.
+        to (int or str): id or name of the destination worker.
+        func (callable): any callable function. builtin functions (like
+                         ``torch.add``) can be sent over RPC more efficiently.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -164,14 +187,14 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
     if not callable(func):
         raise TypeError("function should be callable.")
 
-    if _agent is None:
-        raise RuntimeError("RPC has not been initialized. "
-                           "Call init_rpc(name) first.")
-
     qualified_name = torch.jit._find_builtin(func)
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
+
+    if isinstance(to, str):
+        to = _agent.get_worker_id(to)
+
     if qualified_name is not None:
         fut = invoke_rpc_builtin(_agent, to, qualified_name, *args, **kwargs)
     else:

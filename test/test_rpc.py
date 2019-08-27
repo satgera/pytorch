@@ -87,6 +87,15 @@ class RpcTest(MultiProcessTestCase):
         self.assertEqual(ret, torch.ones(n, n) * 2)
 
     @_wrap_with_rpc
+    def test_add_with_id(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        workder_id = dist.get_worker_id('worker{}'.format(dst_rank))
+        ret = dist.rpc(workder_id, torch.add,
+                       args=(torch.ones(n, n), torch.ones(n, n)))
+        self.assertEqual(ret, torch.ones(n, n) * 2)
+
+    @_wrap_with_rpc
     def test_scalar_add(self):
         n = self.rank + 1
         dst_rank = n % self.world_size

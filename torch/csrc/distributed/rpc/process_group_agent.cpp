@@ -60,7 +60,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::unordered_map<std::string, int> nameMap,
     std::shared_ptr<c10d::ProcessGroup> pg,
     int numSendRecvThreads)
-    : RpcAgent(std::move(workerName), processRequestBlocking),
+    : RpcAgent(std::move(workerName), pg->getRank(), processRequestBlocking),
       nameMap_(std::move(nameMap)),
       stop_(false),
       pg_(std::move(pg)),
@@ -76,12 +76,20 @@ ProcessGroupAgent::ProcessGroupAgent(
       "Resolved worker rank ", workerRankIter -> second,
       " does not match ProcessGroup rank ", pg_->getRank());
 
-  names_.resize(nameMap_.size());
-  for (auto& entry : nameMap_) {
-    names_[entry.second] = entry.first;
-  }
   PythonRpcHandler::init();
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
+}
+
+worker_id_t ProcessGroupAgent::getId() {
+  return id_;
+}
+
+worker_id_t ProcessGroupAgent::getWorkerId(const std::string& workerName) {
+  const auto idIter = nameMap_.find(workerName);
+  TORCH_CHECK(idIter != nameMap_.end(),
+      "Unknown destination worker ", workerName);
+
+  return idIter->second;
 }
 
 void ProcessGroupAgent::join() {
@@ -112,14 +120,12 @@ void ProcessGroupAgent::sync() {
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
-    const std::string& to, Message&& message) {
-
-  auto dstRankIter = nameMap_.find(to);
-  TORCH_CHECK(dstRankIter != nameMap_.end(), "Unknown destination worker ", to);
-
-  const int dstRank = dstRankIter -> second;
-  TORCH_CHECK(dstRank != pg_->getRank(), "ProcessGroupAgent does not support "
-    "making RPC calls to self.")
+    worker_id_t to, Message&& message) {
+  TORCH_CHECK(to != (worker_id_t)pg_->getRank(),
+      "ProcessGroupAgent does not support making RPC calls to self.")
+  TORCH_CHECK(to < (worker_id_t)pg_->getSize(),
+      "Destination rank is out of bound, got ", to,
+      ", but world size is ", pg_->getRank());
 
   auto requestId = nextId();
   auto future = std::make_shared<FutureMessage>();
@@ -133,7 +139,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     future->markCompleted();
   }
 
-  enqueueSend(SendWork(dstRank, std::move(message)));
+  enqueueSend(SendWork(to, std::move(message)));
   return future;
 }
 
@@ -197,7 +203,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
       Message message = deserialize(work.type_, ss);
 
       if (message.isRequest()) {
-        cb_(names_[work.from_], std::move(message), *this);
+        cb_(work.from_, std::move(message), *this);
       } else if (message.isResponse()) {
         auto id = message.id();
         {

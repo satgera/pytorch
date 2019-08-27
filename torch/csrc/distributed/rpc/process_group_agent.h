@@ -47,7 +47,11 @@ class ProcessGroupAgent : public RpcAgent {
   // SendWork object, and put the SendWork into a queue. Another thread will
   // consume SendWork from the queue and send it out.
   std::shared_ptr<FutureMessage> send(
-      const std::string& to, Message&& message) override;
+      worker_id_t to, Message&& message) override;
+
+  worker_id_t getId() override;
+
+  worker_id_t getWorkerId(const std::string& workerName) override;
 
   void join() override;
 
@@ -70,9 +74,6 @@ class ProcessGroupAgent : public RpcAgent {
   bool stop_;
   std::shared_ptr<c10d::ProcessGroup> pg_;
   std::atomic<int64_t> nextId_;
-  // names_[rank] stores the name of the corresponding worker, use this vector
-  // to get worker name from rank and pass it to the RequestCallback.
-  std::vector<std::string> names_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
